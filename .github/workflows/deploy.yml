@@ -1,0 +1,33 @@
+# Publish scuzzlebot.com on every merge to main.
+# The job assumes an AWS role through GitHub's OIDC provider (no stored keys), syncs the site to
+# the private S3 bucket behind CloudFront, and invalidates the cache. Terraform for the role,
+# bucket and distribution: z4um41/twitterbot, terraform/.
+name: deploy
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::561249011990:role/scuzzlebot-site-deploy
+          aws-region: us-west-2
+      - name: Sync site to S3
+        run: >
+          aws s3 sync . s3://scuzzlebot.com --delete
+          --exclude ".git/*" --exclude ".github/*" --exclude "README.md" --exclude "CNAME"
+      - name: Invalidate CloudFront
+        run: aws cloudfront create-invalidation --distribution-id E251I8TREBUZ1T --paths "/*"
