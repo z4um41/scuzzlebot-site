@@ -1,0 +1,48 @@
+name: Check
+
+# Gemel lanes merge into agents/integration only when the pull request carries
+# a green check run of its own, and promotion to main reads the same check on
+# the agent-base head. This job is that check: every HTML file must parse with
+# balanced tags.
+on:
+  pull_request:
+    branches: [main, agents/integration]
+  push:
+    branches: [agents/integration]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Site check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse every HTML file
+        shell: python
+        run: |
+          import pathlib, sys
+          from html.parser import HTMLParser
+          VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"}
+          class Balance(HTMLParser):
+              def __init__(self):
+                  super().__init__(); self.stack = []; self.errors = []
+              def handle_starttag(self, tag, attrs):
+                  if tag not in VOID: self.stack.append((tag, self.getpos()))
+              def handle_startendtag(self, tag, attrs): pass
+              def handle_endtag(self, tag):
+                  if tag in VOID: return
+                  if not self.stack or self.stack[-1][0] != tag:
+                      self.errors.append(f"line {self.getpos()[0]}: unexpected </{tag}>"); return
+                  self.stack.pop()
+          failed = False
+          files = sorted(pathlib.Path(".").rglob("*.html"))
+          for path in files:
+              p = Balance(); p.feed(path.read_text(encoding="utf-8")); p.close()
+              errors = p.errors + [f"line {pos[0]}: <{tag}> is never closed" for tag, pos in p.stack]
+              for e in errors: print(f"{path}: {e}")
+              failed |= bool(errors)
+          print(f"checked {len(files)} HTML file(s)")
+          sys.exit(1 if failed else 0)
